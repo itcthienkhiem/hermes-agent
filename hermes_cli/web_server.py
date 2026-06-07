@@ -7916,23 +7916,32 @@ async def get_models_analytics(days: int = 30):
         cutoff = time.time() - (days * 86400)
 
         cur = db._conn.execute("""
-            SELECT model,
-                   billing_provider,
-                   SUM(input_tokens) as input_tokens,
-                   SUM(output_tokens) as output_tokens,
-                   SUM(cache_read_tokens) as cache_read_tokens,
-                   SUM(reasoning_tokens) as reasoning_tokens,
-                   COALESCE(SUM(estimated_cost_usd), 0) as estimated_cost,
-                   COALESCE(SUM(actual_cost_usd), 0) as actual_cost,
+            WITH provider_by_model AS (
+                SELECT model,
+                       MIN(NULLIF(billing_provider, '')) as inferred_provider
+                FROM sessions
+                WHERE started_at > ? AND model IS NOT NULL AND model != ''
+                GROUP BY model
+            )
+            SELECT s.model,
+                   COALESCE(NULLIF(s.billing_provider, ''), provider_by_model.inferred_provider, '') as billing_provider,
+                   SUM(s.input_tokens) as input_tokens,
+                   SUM(s.output_tokens) as output_tokens,
+                   SUM(s.cache_read_tokens) as cache_read_tokens,
+                   SUM(s.reasoning_tokens) as reasoning_tokens,
+                   COALESCE(SUM(s.estimated_cost_usd), 0) as estimated_cost,
+                   COALESCE(SUM(s.actual_cost_usd), 0) as actual_cost,
                    COUNT(*) as sessions,
-                   SUM(COALESCE(api_call_count, 0)) as api_calls,
-                   SUM(tool_call_count) as tool_calls,
-                   MAX(started_at) as last_used_at,
-                   AVG(input_tokens + output_tokens) as avg_tokens_per_session
-            FROM sessions WHERE started_at > ? AND model IS NOT NULL AND model != ''
-            GROUP BY model, billing_provider
-            ORDER BY SUM(input_tokens) + SUM(output_tokens) DESC
-        """, (cutoff,))
+                   SUM(COALESCE(s.api_call_count, 0)) as api_calls,
+                   SUM(s.tool_call_count) as tool_calls,
+                   MAX(s.started_at) as last_used_at,
+                   AVG(s.input_tokens + s.output_tokens) as avg_tokens_per_session
+            FROM sessions s
+            LEFT JOIN provider_by_model ON provider_by_model.model = s.model
+            WHERE s.started_at > ? AND s.model IS NOT NULL AND s.model != ''
+            GROUP BY s.model, COALESCE(NULLIF(s.billing_provider, ''), provider_by_model.inferred_provider, '')
+            ORDER BY SUM(s.input_tokens) + SUM(s.output_tokens) DESC
+        """, (cutoff, cutoff))
         rows = [dict(r) for r in cur.fetchall()]
 
         models = []

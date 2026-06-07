@@ -313,13 +313,13 @@ export function ChatSidebar({ channel, className }: ChatSidebarProps) {
   return (
     <aside
       className={cn(
-        "flex h-full w-full min-w-0 shrink-0 flex-col gap-3 overflow-y-auto overflow-x-hidden pr-1 lg:w-80",
+        "flex h-full w-full min-w-0 shrink-0 flex-col gap-3 overflow-y-auto overflow-x-hidden lg:w-80",
         className,
       )}
     >
-      <Card className="flex items-center justify-between gap-2 px-3 py-2">
+      <Card className="flex items-center justify-between gap-2 border-border bg-card px-3 py-3 shadow-none">
         <div className="min-w-0">
-          <div className="text-display text-xs tracking-wider text-text-tertiary">
+          <div className="text-xs font-medium text-text-tertiary">
             model
           </div>
 
@@ -365,8 +365,8 @@ export function ChatSidebar({ channel, className }: ChatSidebarProps) {
         </Card>
       )}
 
-      <Card className="flex min-h-0 flex-none flex-col px-2 py-2">
-        <div className="text-display px-1 pb-2 text-xs tracking-wider text-text-tertiary">
+      <Card className="flex min-h-0 flex-none flex-col border-border bg-card px-2 py-2 shadow-none">
+        <div className="px-1 pb-2 text-xs font-medium text-text-tertiary">
           tools
         </div>
 

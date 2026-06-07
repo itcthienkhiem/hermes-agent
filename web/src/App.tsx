@@ -72,6 +72,7 @@ import SessionsPage from "@/pages/SessionsPage";
 import LogsPage from "@/pages/LogsPage";
 import AnalyticsPage from "@/pages/AnalyticsPage";
 import ModelsPage from "@/pages/ModelsPage";
+import ModelKeysPage from "@/pages/ModelKeysPage";
 import CronPage from "@/pages/CronPage";
 import ProfilesPage from "@/pages/ProfilesPage";
 import SkillsPage from "@/pages/SkillsPage";
@@ -126,6 +127,7 @@ const BUILTIN_ROUTES_CORE: Record<string, ComponentType> = {
   "/sessions": SessionsPage,
   "/analytics": AnalyticsPage,
   "/models": ModelsPage,
+  "/model-keys": ModelKeysPage,
   "/logs": LogsPage,
   "/cron": CronPage,
   "/skills": SkillsPage,
@@ -168,6 +170,7 @@ const BUILTIN_NAV_REST: NavItem[] = [
     label: "Models",
     icon: Cpu,
   },
+  { path: "/model-keys", label: "Model Keys", icon: KeyRound },
   { path: "/logs", labelKey: "logs", label: "Logs", icon: FileText },
   { path: "/cron", labelKey: "cron", label: "Cron", icon: Clock },
   { path: "/skills", labelKey: "skills", label: "Skills", icon: Package },
@@ -469,7 +472,7 @@ export default function App() {
   return (
     <div
       data-layout-variant={layoutVariant}
-      className="flex h-dvh max-h-dvh min-h-0 flex-col overflow-hidden bg-black text-text-primary antialiased"
+      className="flex h-dvh max-h-dvh min-h-0 flex-col overflow-hidden bg-background text-text-primary antialiased"
     >
       <SelectionSwitcher />
       <Backdrop />
@@ -479,8 +482,8 @@ export default function App() {
         className={cn(
           "lg:hidden fixed top-0 left-0 right-0 z-40 min-h-14",
           "flex items-center gap-2 px-4 py-2",
-          "border-b border-current/20",
-          "bg-background-base/90 backdrop-blur-sm",
+            "border-b border-border",
+            "bg-card/95 backdrop-blur-sm",
         )}
         style={{
           background: "var(--component-header-background)",
@@ -501,10 +504,9 @@ export default function App() {
         </Button>
 
         <Typography
-          className="font-bold text-[0.95rem] leading-[0.95] tracking-[0.05em] text-midground"
-          style={{ mixBlendMode: "plus-lighter" }}
+          className="font-bold text-[0.95rem] leading-none tracking-normal text-foreground"
         >
-          {t.app.brand}
+          Hermes Agent
         </Typography>
       </header>
 
@@ -529,8 +531,8 @@ export default function App() {
             aria-label={t.app.navigation}
             className={cn(
               "fixed top-0 left-0 z-50 flex h-dvh max-h-dvh w-64 min-h-0 flex-col",
-              "border-r border-current/20",
-              "bg-background-base/95 backdrop-blur-sm",
+              "border-r border-border",
+              "bg-card/95 backdrop-blur-sm",
               "transition-[transform] duration-200 ease-out",
               mobileOpen ? "translate-x-0" : "-translate-x-full",
               "lg:sticky lg:top-0 lg:translate-x-0 lg:shrink-0 lg:overflow-hidden",
@@ -546,7 +548,7 @@ export default function App() {
             <div
               className={cn(
                 "flex h-14 shrink-0 items-center gap-2",
-                "border-b border-current/20",
+                "border-b border-border",
                 collapsed ? "lg:justify-center lg:px-0" : "px-4 justify-between",
               )}
             >
@@ -558,13 +560,8 @@ export default function App() {
               >
                 <PluginSlot name="header-left" />
 
-                <Typography
-                  className="font-bold text-[1.125rem] leading-[0.95] tracking-[0.0525rem] text-midground uppercase"
-                  style={{ mixBlendMode: "plus-lighter" }}
-                >
-                  Hermes
-                  <br />
-                  Agent
+                <Typography className="font-bold text-[1rem] leading-none tracking-normal text-foreground">
+                  Hermes Agent
                 </Typography>
               </div>
 
@@ -596,7 +593,7 @@ export default function App() {
             </div>
 
             <nav
-              className="min-h-0 w-full flex-1 overflow-y-auto overflow-x-hidden border-t border-current/10 py-2"
+              className="min-h-0 w-full flex-1 overflow-y-auto overflow-x-hidden border-t border-border/70 py-2"
               aria-label={t.app.navigation}
             >
               <ul className="flex flex-col">
@@ -615,13 +612,13 @@ export default function App() {
               {sidebarNav.pluginItems.length > 0 && (
                 <div
                   aria-labelledby="hermes-sidebar-plugin-nav-heading"
-                  className="flex flex-col border-t border-current/10 pb-2"
+                  className="flex flex-col border-t border-border/70 pb-2"
                   role="group"
                 >
                   <span
                     className={cn(
                       "px-5 pt-2.5 pb-1",
-                      "font-mondwest text-display text-xs tracking-[0.12em] text-text-tertiary",
+                      "font-medium text-xs tracking-normal text-text-tertiary",
                       isDesktopCollapsed && "lg:hidden",
                     )}
                     id="hermes-sidebar-plugin-nav-heading"
@@ -656,7 +653,7 @@ export default function App() {
               className={cn(
                 "flex shrink-0 items-center gap-2",
                 "px-3 py-2",
-                "border-t border-current/20",
+                "border-t border-border",
                 isDesktopCollapsed
                   ? "lg:flex-col lg:items-start lg:gap-3 lg:py-3"
                   : "justify-between",

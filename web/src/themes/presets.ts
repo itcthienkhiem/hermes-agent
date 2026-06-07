@@ -40,18 +40,150 @@ const DEFAULT_LAYOUT: ThemeLayout = {
 
 export const defaultTheme: DashboardTheme = {
   name: "default",
-  label: "Hermes Teal",
-  description: "Classic dark teal — the canonical Hermes look",
+  label: "Enterprise",
+  description: "Clean enterprise dashboard with neutral chrome",
   palette: {
-    background: { hex: "#041c1c", alpha: 1 },
-    midground: { hex: "#ffe6cb", alpha: 1 },
+    background: { hex: "#f5f7fb", alpha: 1 },
+    midground: { hex: "#172033", alpha: 1 },
     foreground: { hex: "#ffffff", alpha: 0 },
-    warmGlow: "rgba(255, 189, 56, 0.35)",
-    noiseOpacity: 1,
+    warmGlow: "rgba(255, 255, 255, 0)",
+    noiseOpacity: 0,
   },
-  typography: DEFAULT_TYPOGRAPHY,
-  layout: DEFAULT_LAYOUT,
-  terminalBackground: "#000000",
+  typography: {
+    ...DEFAULT_TYPOGRAPHY,
+    fontSans: `"Inter", ${SYSTEM_SANS}`,
+    fontMono: `"JetBrains Mono", ${SYSTEM_MONO}`,
+    fontDisplay: `"Inter", ${SYSTEM_SANS}`,
+    fontUrl:
+      "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap",
+    baseSize: "14px",
+    lineHeight: "1.5",
+  },
+  layout: {
+    radius: "0.5rem",
+    density: "compact",
+  },
+  terminalBackground: "#0b1020",
+  colorOverrides: {
+    card: "#ffffff",
+    cardForeground: "#172033",
+    popover: "#ffffff",
+    popoverForeground: "#172033",
+    primary: "#2457d6",
+    primaryForeground: "#ffffff",
+    secondary: "#eef2f7",
+    secondaryForeground: "#172033",
+    muted: "#f3f5f9",
+    mutedForeground: "#5f6b7a",
+    accent: "#e8eefc",
+    accentForeground: "#163c9f",
+    border: "#d8dee9",
+    input: "#cbd5e1",
+    ring: "#2457d6",
+    success: "#16803c",
+    warning: "#b7791f",
+    destructive: "#d92d20",
+  },
+  componentStyles: {
+    backdrop: {
+      fillerOpacity: "0",
+    },
+    header: {
+      background: "rgba(255, 255, 255, 0.88)",
+      clipPath: "none",
+      borderImage: "none",
+    },
+    sidebar: {
+      background: "#ffffff",
+      clipPath: "none",
+      borderImage: "none",
+    },
+    tab: {
+      clipPath: "none",
+    },
+  },
+  seriesColors: {
+    inputTokenAccent: "#2457d6",
+    outputTokenAccent: "#0f766e",
+  },
+  customCSS: `
+    :root {
+      --color-text-primary: #172033;
+      --color-text-secondary: #4b5565;
+      --color-text-tertiary: #7a8699;
+      --enterprise-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+      --enterprise-shadow-md: 0 10px 30px rgba(15, 23, 42, 0.08);
+    }
+
+    #root [class*="font-mondwest"],
+    #root .font-expanded,
+    #root .text-display {
+      font-family: var(--theme-font-sans) !important;
+      letter-spacing: 0 !important;
+    }
+
+    #root .uppercase {
+      text-transform: none !important;
+    }
+
+    #app-sidebar {
+      box-shadow: var(--enterprise-shadow-sm);
+    }
+
+    #app-sidebar nav a,
+    #app-sidebar button {
+      border-radius: 0.375rem;
+      margin: 0.125rem 0.5rem;
+      padding-left: 0.875rem;
+      padding-right: 0.875rem;
+      font-size: 0.875rem;
+      font-weight: 500;
+    }
+
+    #app-sidebar nav a[aria-current="page"] {
+      background: #eef4ff;
+      color: #1d4ed8;
+    }
+
+    #root [role="banner"] {
+      box-shadow: 0 1px 0 rgba(15, 23, 42, 0.06);
+    }
+
+    #root [role="banner"] h1 {
+      color: #172033;
+      font-size: 0.95rem;
+      font-weight: 700;
+      mix-blend-mode: normal !important;
+    }
+
+    #root .bg-card,
+    #root [class*="bg-card"] {
+      box-shadow: var(--enterprise-shadow-sm);
+    }
+
+    #root .hermes-chat-workbench {
+      background: #ffffff;
+      border: 1px solid #d8dee9;
+      box-shadow: var(--enterprise-shadow-md);
+    }
+
+    #root .hermes-chat-toolbar {
+      background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+      border-bottom: 1px solid #d8dee9;
+    }
+
+    #root .hermes-chat-terminal-frame {
+      background: #0b1020;
+      border: 1px solid #111827;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+    }
+
+    #root .hermes-chat-sidebar {
+      background: #ffffff;
+      border: 1px solid #d8dee9;
+      box-shadow: var(--enterprise-shadow-sm);
+    }
+  `,
 };
 
 export const midnightTheme: DashboardTheme = {

@@ -26,7 +26,7 @@ import { Button } from "@nous-research/ui/ui/components/button";
 import { Typography } from "@nous-research/ui/ui/components/typography/index";
 import { HERMES_BASE_PATH, buildWsAuthParam } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { Copy, PanelRight, X } from "lucide-react";
+import { Copy, MessageSquare, PanelRight, Send, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useSearchParams } from "react-router-dom";
@@ -109,11 +109,22 @@ function terminalLineHeightForWidth(layoutWidthPx: number): number {
   return layoutWidthPx < 1024 ? 1.02 : 1.15;
 }
 
+function isPrintableTerminalInput(data: string): boolean {
+  return data.length > 0 && !/[\x00-\x1f\x7f\x1b]/.test(data);
+}
+
 export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const submitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const submitReturnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const submitSeqRef = useRef(0);
+  const imeComposingRef = useRef(false);
+  const imeTextRef = useRef("");
+  const imeSuppressRef = useRef<{ text: string; until: number } | null>(null);
   // Exposed to the main metrics-sync effect so it can refit the terminal
   // the moment `isActive` flips back to true (display:none → display:flex
   // collapses the host's box, so ResizeObserver never fires on return).
@@ -132,6 +143,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
       : null,
   );
   const [copyState, setCopyState] = useState<"idle" | "copied">("idle");
+  const [composerValue, setComposerValue] = useState("");
   const copyResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Raw state for the mobile side-sheet + a derived value that force-
   // closes whenever the chat tab isn't active.  The *derived* value is
@@ -282,6 +294,45 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
     termRef.current?.focus();
   };
 
+  const submitComposer = useCallback(() => {
+    const text = (composerRef.current?.value ?? composerValue)
+      .trimEnd()
+      .replace(/\r?\n/g, " ");
+    if (!text.trim()) return;
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      setBanner("Chat connection is not ready. Reload the page and try again.");
+      return;
+    }
+
+    if (submitTimerRef.current) clearTimeout(submitTimerRef.current);
+    if (submitReturnTimerRef.current) clearTimeout(submitReturnTimerRef.current);
+
+    const seq = ++submitSeqRef.current;
+
+    // Clear the hidden Ink prompt robustly before forwarding the dashboard
+    // composer value. Ctrl+U only deletes to the start from the current cursor;
+    // Ctrl+A then Ctrl+K clears the entire prompt even if stale text or cursor
+    // position leaked from a previous turn.
+    ws.send("\x01\x0b");
+
+    submitTimerRef.current = setTimeout(() => {
+      if (submitSeqRef.current !== seq) return;
+      const s = wsRef.current;
+      if (!s || s.readyState !== WebSocket.OPEN) return;
+
+      s.send(text);
+      submitReturnTimerRef.current = setTimeout(() => {
+        if (submitSeqRef.current !== seq) return;
+        const current = wsRef.current;
+        if (current && current.readyState === WebSocket.OPEN) current.send("\r");
+      }, 100);
+    }, 20);
+
+    setComposerValue("");
+    requestAnimationFrame(() => composerRef.current?.focus());
+  }, [composerValue]);
+
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
@@ -299,6 +350,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
     const term = new Terminal({
       allowProposedApi: true,
       cursorBlink: true,
+      disableStdin: true,
       fontFamily:
         "'JetBrains Mono', 'Cascadia Mono', 'Fira Code', 'MesloLGS NF', 'Source Code Pro', Menlo, Consolas, 'DejaVu Sans Mono', monospace",
       fontSize: terminalFontSizeForWidth(tierW0),
@@ -376,6 +428,17 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
     term.attachCustomKeyEventHandler((ev) => {
       if (ev.type !== "keydown") return true;
 
+      if (
+        ev.isComposing ||
+        ev.key === "Process" ||
+        ev.keyCode === 229 ||
+        imeComposingRef.current
+      ) {
+        imeComposingRef.current = true;
+        ev.preventDefault();
+        return false;
+      }
+
       // Copy: Cmd+C on macOS, Ctrl+Shift+C on other platforms. Bare Ctrl+C
       // is reserved for SIGINT to the TUI child — matches xterm / gnome-terminal /
       // konsole / Windows Terminal. Ctrl+Shift+C only copies if a selection exists;
@@ -446,6 +509,80 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
     term.loadAddon(new WebLinksAddon());
 
     term.open(host);
+
+    // xterm's hidden textarea is usually enough for keyboard input, but some
+    // browser/OS Vietnamese IMEs emit intermediate Telex/VNI keystrokes through
+    // xterm before the final glyph is committed.  That sends "af" to the PTY
+    // instead of "à".  While an IME composition is active we drop printable
+    // intermediary bytes in onData and send only committed Unicode from the
+    // browser's composition/beforeinput/input events.
+    let disposeImeBridge: (() => void) | null = null;
+    const helperTextarea = host.querySelector(
+      "textarea.xterm-helper-textarea",
+    ) as HTMLTextAreaElement | null;
+    if (helperTextarea) {
+      const sendCommittedText = (text: string) => {
+        if (!text) return;
+        if (/^[\x00-\x7f]+$/.test(text)) return;
+        const ws = wsRef.current;
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        imeSuppressRef.current = {
+          text,
+          until: performance.now() + 150,
+        };
+        ws.send(text);
+        helperTextarea.value = "";
+      };
+      const onCompositionStart = () => {
+        imeComposingRef.current = true;
+        imeTextRef.current = "";
+      };
+      const onCompositionUpdate = (event: CompositionEvent) => {
+        imeTextRef.current = event.data ?? "";
+      };
+      const onCompositionEnd = (event: CompositionEvent) => {
+        const text = event.data || imeTextRef.current;
+        imeComposingRef.current = false;
+        imeTextRef.current = "";
+        sendCommittedText(text);
+      };
+      const onBeforeInput = (event: InputEvent) => {
+        const data = event.data ?? "";
+        const inputType = event.inputType ?? "";
+        if (
+          inputType.includes("Composition") ||
+          (!/^[\x00-\x7f]*$/.test(data) && data.length > 0)
+        ) {
+          imeTextRef.current = data || imeTextRef.current;
+          if (data && !inputType.includes("Composition")) {
+            event.preventDefault();
+            sendCommittedText(data);
+          }
+        }
+      };
+      const onInput = () => {
+        const value = helperTextarea.value;
+        if (!value || /^[\x00-\x7f]+$/.test(value)) return;
+        imeComposingRef.current = false;
+        imeTextRef.current = "";
+        sendCommittedText(value);
+      };
+      helperTextarea.addEventListener("compositionstart", onCompositionStart, true);
+      helperTextarea.addEventListener("compositionupdate", onCompositionUpdate, true);
+      helperTextarea.addEventListener("compositionend", onCompositionEnd, true);
+      helperTextarea.addEventListener("beforeinput", onBeforeInput, true);
+      helperTextarea.addEventListener("input", onInput, true);
+      disposeImeBridge = () => {
+        helperTextarea.removeEventListener("compositionstart", onCompositionStart, true);
+        helperTextarea.removeEventListener("compositionupdate", onCompositionUpdate, true);
+        helperTextarea.removeEventListener("compositionend", onCompositionEnd, true);
+        helperTextarea.removeEventListener("beforeinput", onBeforeInput, true);
+        helperTextarea.removeEventListener("input", onInput, true);
+        imeComposingRef.current = false;
+        imeTextRef.current = "";
+        imeSuppressRef.current = null;
+      };
+    }
 
     // WebGL draws from a texture atlas sized with device pixels. On phones and
     // in DevTools device mode that often produces *visually* much larger cells
@@ -668,6 +805,26 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
       onDataDisposable = term.onData((data) => {
         if (ws.readyState !== WebSocket.OPEN) return;
 
+        if (
+          imeComposingRef.current &&
+          isPrintableTerminalInput(data)
+        ) {
+          return;
+        }
+
+        const suppressedIme = imeSuppressRef.current;
+        if (
+          suppressedIme &&
+          suppressedIme.text === data &&
+          performance.now() <= suppressedIme.until
+        ) {
+          imeSuppressRef.current = null;
+          return;
+        }
+        if (suppressedIme && performance.now() > suppressedIme.until) {
+          imeSuppressRef.current = null;
+        }
+
         if (SGR_MOUSE_RE.test(data)) {
           return;
         }
@@ -682,13 +839,14 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
       });
     })();
 
-    term.focus();
+    requestAnimationFrame(() => composerRef.current?.focus());
 
     return () => {
       unmounting = true;
       syncMetricsRef.current = null;
       onDataDisposable?.dispose();
       onResizeDisposable?.dispose();
+      disposeImeBridge?.();
       if (metricsDebounce) clearTimeout(metricsDebounce);
       window.removeEventListener("resize", scheduleSyncTerminalMetrics);
       window.visualViewport?.removeEventListener(
@@ -712,6 +870,14 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
       if (copyResetRef.current) {
         clearTimeout(copyResetRef.current);
         copyResetRef.current = null;
+      }
+      if (submitTimerRef.current) {
+        clearTimeout(submitTimerRef.current);
+        submitTimerRef.current = null;
+      }
+      if (submitReturnTimerRef.current) {
+        clearTimeout(submitReturnTimerRef.current);
+        submitReturnTimerRef.current = null;
       }
     };
   }, [channel, resumeParam]);
@@ -751,7 +917,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
           host !== null &&
           !host.contains(active);
         if (!focusIsElsewhereInChatPage) {
-          termRef.current?.focus();
+          composerRef.current?.focus();
         }
       });
     });
@@ -859,7 +1025,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
     );
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2">
+    <div className="flex min-h-0 flex-1 flex-col gap-4">
       <PluginSlot name="chat:top" />
       {mobileModelToolsPortal}
 
@@ -869,21 +1035,76 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1 flex-col gap-2 lg:flex-row lg:gap-3">
+      <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
         <div
           className={cn(
-            "relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg",
-            "p-2 sm:p-3",
+            "hermes-chat-workbench relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg",
           )}
-          style={{
-            backgroundColor: terminalBg,
-            boxShadow: "0 8px 32px rgba(0, 0, 0, 0.4)",
-          }}
         >
+          <div className="hermes-chat-toolbar flex h-12 shrink-0 items-center justify-between gap-3 px-4">
+            <div className="flex min-w-0 items-center gap-2">
+              <MessageSquare className="h-4 w-4 shrink-0 text-primary" />
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold text-foreground">
+                  Hermes Chat
+                </div>
+                <div className="truncate text-xs text-text-tertiary">
+                  {resumeParam ? "Resumed session" : "New session"}
+                </div>
+              </div>
+            </div>
+            <div className="hidden items-center gap-2 text-xs text-text-tertiary sm:flex">
+              <span className="h-2 w-2 rounded-full bg-success" />
+              Live
+            </div>
+          </div>
+
           <div
-            ref={hostRef}
-            className="hermes-chat-xterm-host min-h-0 min-w-0 flex-1"
-          />
+            className="hermes-chat-terminal-frame relative m-3 min-h-0 min-w-0 flex-1 overflow-hidden rounded-md p-2"
+            style={{ backgroundColor: terminalBg }}
+            onClick={() => composerRef.current?.focus()}
+          >
+            <div className="absolute inset-2 overflow-hidden">
+              <div
+                ref={hostRef}
+                className="hermes-chat-xterm-host h-full min-h-0 min-w-0"
+              />
+            </div>
+          </div>
+
+          <div className="border-t border-border bg-card px-3 py-3">
+            <div className="flex min-w-0 items-end gap-2 rounded-md border border-input bg-background px-3 py-2 shadow-sm focus-within:border-primary focus-within:ring-1 focus-within:ring-primary/20">
+              <textarea
+                ref={composerRef}
+                value={composerValue}
+                onChange={(event) => setComposerValue(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+                  if (event.key !== "Enter" || event.shiftKey) return;
+                  event.preventDefault();
+                  submitComposer();
+                }}
+                rows={1}
+                placeholder="Nhập tin nhắn tiếng Việt ở đây..."
+                className="max-h-32 min-h-8 flex-1 resize-none bg-transparent py-1 text-sm leading-5 text-foreground outline-none placeholder:text-text-tertiary"
+                spellCheck={false}
+              />
+              <Button
+                type="button"
+                size="icon"
+                onClick={submitComposer}
+                disabled={!composerValue.trim()}
+                aria-label="Send message"
+                title="Send"
+                className="shrink-0"
+              >
+                <Send className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="mt-1 text-xs text-text-tertiary">
+              Enter để gửi, Shift+Enter để xuống dòng.
+            </div>
+          </div>
 
           <Button
             ghost
@@ -897,8 +1118,7 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
               "bg-black/20 backdrop-blur-sm",
               "opacity-70 hover:opacity-100 hover:border-current/60",
               "transition-opacity duration-150",
-              "bottom-2 right-2 px-2 py-1 text-xs sm:bottom-3 sm:right-3 sm:px-2.5 sm:py-1.5",
-              "lg:bottom-4 lg:right-4",
+              "bottom-5 right-5 px-2 py-1 text-xs sm:px-2.5 sm:py-1.5",
             )}
             style={{ color: TERMINAL_THEME_STATIC.foreground }}
           >
@@ -916,9 +1136,9 @@ export default function ChatPage({ isActive = true }: { isActive?: boolean }) {
             id="chat-side-panel"
             role="complementary"
             aria-label={modelToolsLabel}
-            className="flex min-h-0 shrink-0 flex-col overflow-hidden lg:h-full lg:w-80"
+            className="hermes-chat-sidebar flex min-h-0 shrink-0 flex-col overflow-hidden rounded-lg lg:h-full lg:w-80"
           >
-            <div className="min-h-0 flex-1 overflow-hidden">
+            <div className="min-h-0 flex-1 overflow-hidden p-3">
               <ChatSidebar channel={channel} />
             </div>
           </div>
